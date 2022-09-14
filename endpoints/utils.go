@@ -18,6 +18,7 @@ func jsonToMap(jsonStr string) map[string]interface{} {
 	return result
 }
 
+// generic helper function for fetching http data
 func fetchData(url string) (chan map[string]interface{}, chan error) {
 
 	r := make(chan map[string]interface{})

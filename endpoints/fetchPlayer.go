@@ -101,6 +101,7 @@ func getTankStats(server, id string) ([]TankStat, error) {
 
 		tankStatsInner := tankStats["data"].(map[string]interface{})
 
+		// If no user exists but the user ID is in a valid format, the WG API will just return null data instead of an actual error
 		if tankStatsInner[id] == nil {
 			return make([]TankStat, 0), errors.New("Player tank stats null")
 		}
@@ -134,7 +135,7 @@ func FetchPlayer(w http.ResponseWriter, req *http.Request) {
 	server, _ := vars["server"]
 
 	if _, err := strconv.Atoi(id); err != nil {
-		invalidId, _ := json.Marshal(Response{Status: "error", Id: id, Error: "ID is not an integer"})
+		invalidId, _ := json.Marshal(Response{Status: "error", Id: id, Error: "ID must be an integer"})
 		w.Write(invalidId)
 		return
 	}
