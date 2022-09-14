@@ -2,8 +2,11 @@ package main
 
 import (
 	"net/http"
+	"os"
 
 	"tomato_proxy/endpoints"
+
+	"fmt"
 
 	"github.com/gorilla/mux"
 	"github.com/joho/godotenv"
@@ -14,5 +17,5 @@ func main() {
 	r := mux.NewRouter()
 	r.HandleFunc("/fetchPlayer/{server}/{id}", endpoints.FetchPlayer)
 
-	http.ListenAndServe(":8000", r)
+	http.ListenAndServe(fmt.Sprint(":", os.Getenv("PORT")), r)
 }
