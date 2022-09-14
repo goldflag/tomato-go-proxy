@@ -18,9 +18,10 @@ func jsonToMap(jsonStr string) map[string]interface{} {
 	return result
 }
 
-func fetchData(url string) <-chan map[string]interface{} {
+func fetchData(url string) (chan map[string]interface{}, chan error) {
 
 	r := make(chan map[string]interface{})
+	e := make(chan error)
 
 	go func() {
 		defer close(r)
@@ -29,7 +30,7 @@ func fetchData(url string) <-chan map[string]interface{} {
 
 		if err != nil {
 			fmt.Printf(err.Error())
-			r <- make(map[string]interface{})
+			e <- err
 			return
 		}
 
@@ -38,14 +39,19 @@ func fetchData(url string) <-chan map[string]interface{} {
 
 		if err != nil {
 			fmt.Printf(err.Error())
-			r <- make(map[string]interface{})
+			e <- err
 			return
 		}
 
 		err = json.Unmarshal([]byte(body), &parsed)
+		if err != nil {
+			fmt.Printf(err.Error())
+			e <- err
+			return
+		}
 
 		r <- parsed
 	}()
 
-	return r
+	return r, e
 }

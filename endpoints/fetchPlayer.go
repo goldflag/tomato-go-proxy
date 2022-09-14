@@ -1,6 +1,7 @@
 package endpoints
 
 import (
+	"errors"
 	"fmt"
 	"net/http"
 
@@ -8,6 +9,7 @@ import (
 
 	"encoding/json"
 	"os"
+	"strconv"
 
 	"github.com/mitchellh/mapstructure"
 )
@@ -46,48 +48,76 @@ type PlayerStat struct {
 	Nickname string `json:"nickname"`
 }
 
-func getLinks(server, id string) []string {
-	return []string{
-		fmt.Sprint(
-			"https://api.worldoftanks.",
-			server,
-			"/wot/account/info/?application_id=",
-			os.Getenv("API_KEY"),
-			"&account_id=",
-			id,
-			"&fields=statistics.all.battles%2Cnickname",
-		),
-		fmt.Sprint(
-			"https://api.worldoftanks.",
-			server,
-			"/wot/tanks/stats/?application_id=",
-			os.Getenv("API_KEY"),
-			"&account_id=",
-			id,
-			"&fields=tank_id%2call.draws%2call.wins%2call.losses%2call.xp%2call.dropped_capture_points%2call.spotted%2call.battles%2call.capture_points%2call.survived_battles%2call.damage_dealt%2call.damage_received%2call.frags%2call.tanking_factor%2call.avg_damage_blocked%2call.shots%2call.hits%2call.piercings",
-		),
+func getGeneralStats(server, id string) (PlayerStat, error) {
+	link := fmt.Sprint(
+		"https://api.worldoftanks.",
+		server,
+		"/wot/account/info/?application_id=",
+		os.Getenv("API_KEY"),
+		"&account_id=",
+		id,
+		"&fields=statistics.all.battles%2Cnickname",
+	)
+	resChannel, errChannel := fetchData(link)
+
+	select {
+	case generalStats := <-resChannel:
+
+		// handles Wargaming API error
+		if generalStats["status"] == "error" {
+			return PlayerStat{}, errors.New(fmt.Sprint(generalStats["error"]))
+		}
+
+		generalStatsInner := generalStats["data"].(map[string]interface{})[id]
+
+		var stats PlayerStat
+		mapstructure.Decode(generalStatsInner, &stats)
+		return stats, nil
+	case err := <-errChannel:
+		return PlayerStat{}, err
 	}
 }
 
-func getStats(server, id string) (PlayerStat, []TankStat) {
-	links := getLinks(server, id)
-	generalStatsCh, tankStatsCh := fetchData(links[0]), fetchData(links[1])
-	generalStats, tankStats := <-generalStatsCh, <-tankStatsCh
+func getTankStats(server, id string) ([]TankStat, error) {
+	link := fmt.Sprint(
+		"https://api.worldoftanks.",
+		server,
+		"/wot/tanks/stats/?application_id=",
+		os.Getenv("API_KEY"),
+		"&account_id=",
+		id,
+		"&fields=tank_id%2call.draws%2call.wins%2call.losses%2call.xp%2call.dropped_capture_points%2call.spotted%2call.battles%2call.capture_points%2call.survived_battles%2call.damage_dealt%2call.damage_received%2call.frags%2call.tanking_factor%2call.avg_damage_blocked%2call.shots%2call.hits%2call.piercings",
+	)
 
-	tankStatsInner := tankStats["data"].(map[string]interface{})[id].([]any)
-	var processedTankStats []TankStat
+	resChannel, errChannel := fetchData(link)
 
-	for _, v := range tankStatsInner {
-		var tank TankStat
-		mapstructure.Decode(v, &tank)
-		processedTankStats = append(processedTankStats, tank)
+	select {
+	case tankStats := <-resChannel:
+
+		// handles Wargaming API error
+		if tankStats["status"] == "error" {
+			return make([]TankStat, 0), errors.New(fmt.Sprint(tankStats["error"]))
+		}
+
+		tankStatsInner := tankStats["data"].(map[string]interface{})
+
+		if tankStatsInner[id] == nil {
+			return make([]TankStat, 0), errors.New("Player tank stats null")
+		}
+
+		tankStatsInner_ := tankStatsInner[id].([]any)
+
+		var processedTankStats []TankStat
+		for _, v := range tankStatsInner_ {
+			var tank TankStat
+			mapstructure.Decode(v, &tank)
+			processedTankStats = append(processedTankStats, tank)
+		}
+
+		return processedTankStats, nil
+	case err := <-errChannel:
+		return make([]TankStat, 0), err
 	}
-
-	generalStatsInner := generalStats["data"].(map[string]interface{})[id]
-
-	var genernalStats PlayerStat
-	mapstructure.Decode(generalStatsInner, &genernalStats)
-	return genernalStats, processedTankStats
 }
 
 type Response struct {
@@ -95,6 +125,7 @@ type Response struct {
 	Username  string      `json:"username"`
 	Id        string      `json:"id"`
 	TankStats [][]float32 `json:"tankStats"`
+	Error     string      `json:"error"`
 }
 
 func FetchPlayer(w http.ResponseWriter, req *http.Request) {
@@ -102,7 +133,32 @@ func FetchPlayer(w http.ResponseWriter, req *http.Request) {
 	id, _ := vars["id"]
 	server, _ := vars["server"]
 
-	generalStats, processedTankStats := getStats(server, id)
+	if _, err := strconv.Atoi(id); err != nil {
+		invalidId, _ := json.Marshal(Response{Status: "error", Id: id, Error: "ID is not an integer"})
+		w.Write(invalidId)
+		return
+	}
+
+	if server != "com" && server != "eu" && server != "asia" && server != "ru" {
+		invalidServer, _ := json.Marshal(Response{Status: "error", Id: id, Error: `Invalid server. Only valid servers are "com", "asia", "eu", "ru"`})
+		w.Write(invalidServer)
+		return
+	}
+
+	generalStats, generalStatsErr := getGeneralStats(server, id)
+	processedTankStats, processedTankStatsErr := getTankStats(server, id)
+
+	if generalStatsErr != nil {
+		fail, _ := json.Marshal(Response{Status: "error", Id: id, Error: generalStatsErr.Error()})
+		w.Write(fail)
+		return
+	}
+
+	if processedTankStatsErr != nil {
+		fail, _ := json.Marshal(Response{Status: "error", Id: id, Error: processedTankStatsErr.Error()})
+		w.Write(fail)
+		return
+	}
 
 	if generalStats.Statistics.All.Battles > 0 {
 		var tankStats [][]float32
@@ -136,8 +192,7 @@ func FetchPlayer(w http.ResponseWriter, req *http.Request) {
 		return
 
 	}
-	// failedResp := Response{Status: "fail", Id: id}
 
-	failedResp, _ := json.Marshal(Response{Status: "fail", Id: id})
+	failedResp, _ := json.Marshal(Response{Status: "error", Id: id, Error: "player has no battles"})
 	w.Write(failedResp)
 }
