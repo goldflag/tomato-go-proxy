@@ -1,18 +1,69 @@
-package endpoints
+package main
 
 import (
-	"errors"
-	"fmt"
-	"net/http"
-
-	"github.com/gorilla/mux"
-
 	"encoding/json"
+	"errors"
+	"io/ioutil"
+	"net/http"
 	"os"
 	"strconv"
 
+	"fmt"
+
+	"github.com/gorilla/mux"
+	"github.com/joho/godotenv"
 	"github.com/mitchellh/mapstructure"
 )
+
+func prettyPrint(i interface{}) string {
+	s, _ := json.MarshalIndent(i, "", "\t")
+	return string(s)
+}
+
+func jsonToMap(jsonStr string) map[string]interface{} {
+	result := make(map[string]interface{})
+	json.Unmarshal([]byte(jsonStr), &result)
+	return result
+}
+
+// generic helper function for fetching http data
+func fetchData(url string) (chan map[string]interface{}, chan error) {
+
+	r := make(chan map[string]interface{})
+	e := make(chan error)
+
+	go func() {
+		defer close(r)
+
+		response, err := http.Get(url)
+
+		if err != nil {
+			fmt.Printf(err.Error())
+			e <- err
+			return
+		}
+
+		var parsed map[string]interface{}
+		body, err := ioutil.ReadAll(response.Body)
+
+		if err != nil {
+			fmt.Printf(err.Error())
+			e <- err
+			return
+		}
+
+		err = json.Unmarshal([]byte(body), &parsed)
+		if err != nil {
+			fmt.Printf(err.Error())
+			e <- err
+			return
+		}
+
+		r <- parsed
+	}()
+
+	return r, e
+}
 
 // Endpoint: api.worldoftanks.com/wot/tanks/stats
 type TankStat struct {
@@ -197,4 +248,38 @@ func FetchPlayer(w http.ResponseWriter, req *http.Request) {
 
 	failedResp, _ := json.Marshal(Response{Status: "error", Id: id, Error: "player has no battles"})
 	w.Write(failedResp)
+}
+
+func main() {
+	godotenv.Load()
+	r := mux.NewRouter()
+	fmt.Println(fmt.Sprint("Starting server on port: ", os.Getenv("PORT")))
+
+	/* Returns player tank data in compressed form to save bandwidth
+	*
+	* returns each tank data in an array of this order:
+	* [
+		*	  Tank_id,
+		*	  Battles,
+		*	  Damage_dealt,
+		*	  Damage_received,
+		*	  Frags,
+		*	  Survived_battles,
+		*	  Wins,
+		*	  Losses,
+		*	  Draws,
+		*	  Capture_points,
+		*	  Dropped_capture_points,
+		*	  Xp,
+		*	  Spotted,
+		*	  Tanking_facto,
+		*	  Avg_damage_blocked,
+		*	  Shots,
+		*	  Hits,
+		*	  Piercings
+		* ]
+	*/
+	r.HandleFunc("/fetchPlayer/{server}/{id}", FetchPlayer)
+
+	http.ListenAndServe(fmt.Sprint(":", os.Getenv("PORT")), r)
 }

@@ -1,13 +1,22 @@
 # syntax=docker/dockerfile:1
 
-FROM golang:1.19-alpine
-WORKDIR /container
-COPY go.mod .
-COPY go.sum .
+FROM golang:latest
+
+ENV PRODUCTION=TRUE
+ENV LOGGING=TRUE
+ENV NODE_TLS_REJECT_UNAUTHORIZED='0'
+ENV API_KEY=b1c841697e232f05fac440ba14a09b65
+ENV PORT=8000
+
+WORKDIR /app
+
+COPY go.mod ./
+COPY go.sum ./
 RUN go mod download
-COPY . .
-RUN go build -o ./app/main.go
+
+COPY *.go ./
+
+RUN go build -o /tomato-go-proxy
 
 EXPOSE 8000
-
-CMD [ "/app" ]
+CMD [ "/tomato-go-proxy" ]
